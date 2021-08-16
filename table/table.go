@@ -601,21 +601,56 @@ func (t *Table) initForRenderColumnConfigs() {
 }
 
 func (t *Table) initForRenderColumnLengths() {
-	var findMaxColumnLengths = func(rows []rowStr) {
-		for _, row := range rows {
+	t.maxColumnLengths = make([]int, t.numColumns)
+
+	findMaxColumnLengths := func(rows []rowStr, hint renderHint) {
+		for rowIdx, row := range rows {
 			for colIdx, colStr := range row {
 				longestLineLen := text.LongestLineLen(colStr)
-				if longestLineLen > t.maxColumnLengths[colIdx] {
-					t.maxColumnLengths[colIdx] = longestLineLen
+				foundMerge := false
+				hint.rowNumber = rowIdx + 1
+				if t.getRowConfig(hint).AutoMerge {
+					// look forward
+					lastMergeColIdx := colIdx
+					for nextColIdx := colIdx + 1; nextColIdx < len(row); nextColIdx++ {
+						if row[nextColIdx] == colStr {
+							lastMergeColIdx = nextColIdx
+							foundMerge = true
+							continue
+						}
+						break
+					}
+					// look backward
+					beginMergeColIdx := colIdx
+					for preColIdx := colIdx - 1; preColIdx >= 0 && preColIdx < len(row); preColIdx-- {
+						if row[preColIdx] == colStr {
+							beginMergeColIdx = preColIdx
+							foundMerge = true
+							continue
+						}
+						break
+					}
+					if foundMerge {
+						subLongestLineLen := longestLineLen / (lastMergeColIdx - beginMergeColIdx + 1)
+						if longestLineLen%2 != 0 {
+							subLongestLineLen += 1
+						}
+						if subLongestLineLen > t.maxColumnLengths[colIdx] {
+							t.maxColumnLengths[colIdx] = subLongestLineLen
+						}
+					}
+				}
+				if !foundMerge {
+					if longestLineLen > t.maxColumnLengths[colIdx] {
+						t.maxColumnLengths[colIdx] = longestLineLen
+					}
 				}
 			}
 		}
 	}
-
-	t.maxColumnLengths = make([]int, t.numColumns)
-	findMaxColumnLengths(t.rowsHeader)
-	findMaxColumnLengths(t.rows)
-	findMaxColumnLengths(t.rowsFooter)
+	findMaxColumnLengths(t.rowsHeader, renderHint{isHeaderRow: true})
+	findMaxColumnLengths(t.rows, renderHint{})
+	findMaxColumnLengths(t.rowsFooter, renderHint{isFooterRow: true})
 
 	// restrict the column lengths if any are over or under the limits
 	for colIdx := range t.maxColumnLengths {
